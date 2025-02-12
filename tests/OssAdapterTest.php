@@ -49,7 +49,7 @@ class OssAdapterTest extends TestCase
                     'isCName'    => false,
                 ],
             ],
-            ...$extra,
+            $extra,
         );
         $this->assertInstanceOf(OssAdapter::class, $adapter);
         $this->assertEquals('<bucket>', $adapter->getBucketName());

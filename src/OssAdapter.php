@@ -12,46 +12,36 @@
 namespace Iidestiny\Flysystem\Oss;
 
 use Iidestiny\Flysystem\Oss\Traits\SignatureTrait;
+use League\Flysystem\AdapterInterface;
+use League\Flysystem\Adapter\AbstractAdapter;
+use League\Flysystem\Adapter\Polyfill\NotSupportingVisibilityTrait;
 use League\Flysystem\Config;
-use League\Flysystem\DirectoryAttributes;
-use League\Flysystem\PathPrefixer;
-use League\Flysystem\Visibility;
 use OSS\Core\OssException;
 use OSS\Credentials\StaticCredentialsProvider;
 use OSS\OssClient;
-use League\Flysystem\FileAttributes;
-use League\Flysystem\FilesystemAdapter;
-use League\Flysystem\UnableToCopyFile;
-use League\Flysystem\UnableToCreateDirectory;
-use League\Flysystem\UnableToDeleteDirectory;
-use League\Flysystem\UnableToDeleteFile;
-use League\Flysystem\UnableToMoveFile;
-use League\Flysystem\UnableToReadFile;
-use League\Flysystem\UnableToRetrieveMetadata;
-use League\Flysystem\UnableToSetVisibility;
-use League\Flysystem\UnableToWriteFile;
 
 /**
  * Class OssAdapter.
  *
  * @author iidestiny <iidestiny@vip.qq.com>
  */
-class OssAdapter implements FilesystemAdapter
+class OssAdapter extends AbstractAdapter
 {
+    use NotSupportingVisibilityTrait;
     use SignatureTrait;
 
     /**
      * 系统参数
      */
     public const SYSTEM_FIELD = [
-        'bucket'   => '${bucket}',
-        'etag'     => '${etag}',
+        'bucket' => '${bucket}',
+        'etag' => '${etag}',
         'filename' => '${object}',
-        'size'     => '${size}',
+        'size' => '${size}',
         'mimeType' => '${mimeType}',
-        'height'   => '${imageInfo.height}',
-        'width'    => '${imageInfo.width}',
-        'format'   => '${imageInfo.format}',
+        'height' => '${imageInfo.height}',
+        'width' => '${imageInfo.width}',
+        'format' => '${imageInfo.format}',
     ];
 
     protected $accessKeyId;
@@ -80,7 +70,7 @@ class OssAdapter implements FilesystemAdapter
     protected $client;
 
     /**
-     * @var array<string, mixed>
+     * @var array
      */
     protected array $params = [];
 
@@ -95,18 +85,25 @@ class OssAdapter implements FilesystemAdapter
     protected ?string $cdnUrl = null;
 
     /**
-     * @var PathPrefixer
+     * OssAdapter constructor.
+     *
+     * @param       $accessKeyId
+     * @param       $accessKeySecret
+     * @param       $endpoint
+     * @param       $bucket
+     * @param bool $isCName
+     * @param string $prefix
+     * @param array $buckets
+     * @param mixed ...$params
      */
-    protected $prefixer;
-
-    public function __construct($accessKeyId, $accessKeySecret, $endpoint, $bucket, bool $isCName = false, string $prefix = '', array $buckets = [], ...$params)
+    public function __construct($accessKeyId, $accessKeySecret, $endpoint, $bucket, bool $isCName = false, string $prefix = '', array $buckets = [], array $params = [])
     {
         $this->accessKeyId = $accessKeyId;
         $this->accessKeySecret = $accessKeySecret;
         $this->endpoint = $endpoint;
         $this->bucketName = $bucket;
         $this->isCName = $isCName;
-        $this->prefixer = new PathPrefixer($prefix, DIRECTORY_SEPARATOR);
+        $this->setPathPrefix($prefix);
         $this->buckets = $buckets;
         $this->params = $params;
         $this->initDefaultBucketAdapter();
@@ -120,7 +117,7 @@ class OssAdapter implements FilesystemAdapter
     /**
      * init default bucket adapter.
      *
-     * @return \Iidestiny\Flysystem\Oss\OssAdapter
+     * @return $this
      */
     protected function initDefaultBucketAdapter(): OssAdapter
     {
@@ -142,11 +139,6 @@ class OssAdapter implements FilesystemAdapter
         $this->cdnUrl = $url;
 
         return $this;
-    }
-
-    public function ossKernel(): OssClient
-    {
-        return $this->getClient();
     }
 
     /**
@@ -185,7 +177,7 @@ class OssAdapter implements FilesystemAdapter
             $config['isCName'] ?? false,
             $config['root'] ?? '',
             [],
-            ...$extra);
+            $extra);
 
         return $adapter->setCdnUrl($config['url'] ?? null)->initDefaultBucketAdapter();
     }
@@ -260,9 +252,9 @@ class OssAdapter implements FilesystemAdapter
         $path = $_SERVER['REQUEST_URI'];
         $pos = strpos($path, '?');
         if (false === $pos) {
-            $authStr = urldecode($path) . "\n" . $body;
+            $authStr = urldecode($path)."\n".$body;
         } else {
-            $authStr = urldecode(substr($path, 0, $pos)) . substr($path, $pos, strlen($path) - $pos) . "\n" . $body;
+            $authStr = urldecode(substr($path, 0, $pos)).substr($path, $pos, strlen($path) - $pos)."\n".$body;
         }
         // 验证签名
         $ok = openssl_verify($authStr, $authorization, $pubKey, OPENSSL_ALGO_MD5);
@@ -282,10 +274,10 @@ class OssAdapter implements FilesystemAdapter
     /**
      * oss 直传配置.
      *
-     * @param string $prefix    目录前缀
+     * @param string $prefix 目录前缀
      * @param null $callBackUrl 回调地址
      * @param array $customData 自定义参数
-     * @param int $expire       过期时间（秒）
+     * @param int $expire 过期时间（秒）
      * @param array $systemData 系统接收参数，回调时会返回
      * @param array $policyData 自定义 policy 参数
      *                          see: https://help.aliyun.com/zh/oss/developer-reference/postobject#section-d5z-1ww-wdb
@@ -295,7 +287,7 @@ class OssAdapter implements FilesystemAdapter
      */
     public function signatureConfig(string $prefix = '', $callBackUrl = null, array $customData = [], int $expire = 30, array $systemData = [], array $policyData = []): string
     {
-        $prefix = $this->prefixer->prefixPath($prefix);
+        $prefix = $this->applyPathPrefix($prefix);
 
         // 系统参数
         $system = [];
@@ -304,7 +296,7 @@ class OssAdapter implements FilesystemAdapter
         } else {
             foreach ($systemData as $key => $value) {
                 if (!in_array($value, self::SYSTEM_FIELD, true)) {
-                    throw new \InvalidArgumentException(sprintf('Invalid oss system filed: %s', $value));
+                    throw new \InvalidArgumentException("Invalid oss system filed: {$value}");
                 }
                 $system[$key] = $value;
             }
@@ -315,14 +307,14 @@ class OssAdapter implements FilesystemAdapter
         $data = [];
         if (!empty($customData)) {
             foreach ($customData as $key => $value) {
-                $callbackVar['x:' . $key] = $value;
-                $data[$key] = '${x:' . $key . '}';
+                $callbackVar['x:'.$key] = $value;
+                $data[$key] = '${x:'.$key.'}';
             }
         }
 
         $callbackParam = [
-            'callbackUrl'      => $callBackUrl,
-            'callbackBody'     => urldecode(http_build_query(array_merge($system, $data))),
+            'callbackUrl' => $callBackUrl,
+            'callbackBody' => urldecode(http_build_query(array_merge($system, $data))),
             'callbackBodyType' => 'application/x-www-form-urlencoded',
         ];
         $callbackString = json_encode($callbackParam, JSON_THROW_ON_ERROR);
@@ -380,128 +372,183 @@ class OssAdapter implements FilesystemAdapter
     /**
      * sign url.
      *
-     * @return false|string
+     * @param string $path
+     * @param int $timeout
+     * @param array $options
+     * @param string $method
+     * @return string
+     * @throws \OSS\Core\OssException
+     * @see self::getTemporaryUrl
      */
-    public function getTemporaryUrl(string $path, int $timeout, array $options = [], string $method = OssClient::OSS_HTTP_GET): bool|string
+    public function signUrl(string $path, int $timeout, array $options = [], $method = OssClient::OSS_HTTP_GET): string
     {
-        $path = $this->prefixer->prefixPath($path);
-
-        try {
-            $path = $this->client->signUrl($this->bucketName, $path, $timeout, $method, $options);
-        } catch (OssException $ossException) {
-            return false;
-        }
-
-        return $path;
+        return $this->getTemporaryUrl($path, $timeout, $options, $method);
     }
 
-    public function write(string $path, string $contents, Config $config): void
+    /**
+     * sign url.
+     *
+     * @param string $path
+     * @param int $timeout
+     * @param array $options
+     * @param string $method
+     * @return false|string
+     * @throws \OSS\Core\OssException
+     */
+    public function getTemporaryUrl(string $path, int $timeout, array $options = [], string $method = OssClient::OSS_HTTP_GET): string
     {
-        $path = $this->prefixer->prefixPath($path);
+        $path = $this->applyPathPrefix($path);
+
+        return $this->client->signUrl($this->bucketName, $path, $timeout, $method, $options);
+    }
+
+    /**
+     * write a file.
+     *
+     * @param string $path
+     * @param string $contents
+     *
+     * @return bool
+     */
+    public function write($path, $contents, Config $config)
+    {
+        $path = $this->applyPathPrefix($path);
         $options = $config->get('options', []);
 
-        try {
-            $this->client->putObject($this->bucketName, $path, $contents, $options);
-        } catch (\Exception $exception) {
-            throw UnableToWriteFile::atLocation($path, $exception->getMessage());
-        }
+        $this->client->putObject($this->bucketName, $path, $contents, $options);
+
+        return true;
     }
 
     /**
      * Write a new file using a stream.
      *
+     * @param string $path
+     * @param resource $resource
+     * @param \League\Flysystem\Config $config
+     * @return bool
+     * @throws \OSS\Core\OssException
      * @throws \OSS\Http\RequestCore_Exception
      */
-    public function writeStream(string $path, $contents, Config $config): void
+    public function writeStream($path, $resource, Config $config)
     {
-        $path = $this->prefixer->prefixPath($path);
+        $path = $this->applyPathPrefix($path);
         $options = $config->get('options', []);
 
-        try {
-            $this->client->uploadStream($this->bucketName, $path, $contents, $options);
-        } catch (OssException $exception) {
-            throw UnableToWriteFile::atLocation($path, $exception->getErrorCode(), $exception);
-        }
-    }
-
-    public function move(string $source, string $destination, Config $config): void
-    {
-        try {
-            $this->copy($source, $destination, $config);
-            $this->delete($source);
-        } catch (\Exception $exception) {
-            throw UnableToMoveFile::fromLocationTo($source, $destination);
-        }
+        $this->client->uploadStream($this->bucketName, $path, $resource, $options);
+        return true;
     }
 
     /**
-     * @throws \OSS\Http\RequestCore_Exception
+     * Update a file.
+     *
+     * @param string $path
+     * @param string $contents
+     *
+     * @return bool
      */
-    public function copy(string $source, string $destination, Config $config): void
+    public function update($path, $contents, Config $config)
     {
-        $path = $this->prefixer->prefixPath($source);
-        $newPath = $this->prefixer->prefixPath($destination);
+        return $this->write($path, $contents, $config);
+    }
 
-        try {
-            $this->client->copyObject($this->bucketName, $path, $this->bucketName, $newPath);
-        } catch (OssException $ossException) {
-            throw UnableToCopyFile::fromLocationTo($source, $destination);
+    /**
+     * Update a file using a stream.
+     *
+     * @param string   $path
+     * @param resource $resource
+     *
+     * @return bool
+     */
+    public function updateStream($path, $resource, Config $config)
+    {
+        return $this->writeStream($path, $resource, $config);
+    }
+
+    /**
+     * rename a file.
+     *
+     * @param string $path
+     * @param string $newpath
+     *
+     * @return bool
+     *
+     * @throws OssException
+     */
+    public function rename($path, $newpath)
+    {
+        if (!$this->copy($path, $newpath)) {
+            return false;
         }
+
+        return $this->delete($path);
+    }
+
+    /**
+     * copy a file.
+     *
+     * @param string $path
+     * @param string $newpath
+     *
+     * @return bool
+     */
+    public function copy($path, $newpath)
+    {
+        $path = $this->applyPathPrefix($path);
+        $newpath = $this->applyPathPrefix($newpath);
+
+        $this->client->copyObject($this->bucketName, $path, $this->bucketName, $newpath);
+        return true;
     }
 
     /**
      * delete a file.
      *
-     * @throws \OSS\Http\RequestCore_Exception
+     * @param string $path
+     *
+     * @return bool
+     *
+     * @throws OssException
      */
-    public function delete(string $path): void
+    public function delete($path)
     {
-        $path = $this->prefixer->prefixPath($path);
+        $path = $this->applyPathPrefix($path);
 
-        try {
-            $this->client->deleteObject($this->bucketName, $path);
-        } catch (OssException $ossException) {
-            throw UnableToDeleteFile::atLocation($path);
-        }
+        $this->client->deleteObject($this->bucketName, $path);
+        return true;
     }
 
     /**
-     * @throws OssException|\OSS\Http\RequestCore_Exception
-     * @throws \Exception
+     * Delete a directory.
+     *
+     * @param string $dirname
+     *
+     * @return bool
+     *
+     * @throws OssException
      */
-    public function deleteDirectory(string $path): void
+    public function deleteDir($dirname)
     {
-        try {
-            $contents = $this->listContents($path, false);
-            $files = [];
-            foreach ($contents as $i => $content) {
-                if ($content instanceof DirectoryAttributes) {
-                    $this->deleteDirectory($content->path());
-                    continue;
-                }
-                $files[] = $this->prefixer->prefixPath($content->path());
-                if ($i && 0 === $i % 100) {
-                    $this->client->deleteObjects($this->bucketName, $files);
-                    $files = [];
-                }
-            }
-            !empty($files) && $this->client->deleteObjects($this->bucketName, $files);
-            $this->client->deleteObject($this->bucketName, $this->prefixer->prefixDirectoryPath($path));
-        } catch (OssException $exception) {
-            throw UnableToDeleteDirectory::atLocation($path, $exception->getErrorCode(), $exception);
+        $fileList = $this->listContents($dirname, true);
+        foreach ($fileList as $file) {
+            $this->delete($file['path']);
         }
+
+        return !$this->has($dirname);
     }
 
     /**
-     * @throws \OSS\Http\RequestCore_Exception
+     * create a directory.
+     *
+     * @param string $dirname
+     *
+     * @return bool
      */
-    public function createDirectory(string $path, Config $config): void
+    public function createDir($dirname, Config $config)
     {
-        try {
-            $this->client->createObjectDir($this->bucketName, $this->prefixer->prefixPath($path));
-        } catch (OssException $exception) {
-            throw UnableToCreateDirectory::dueToFailure($path, $exception);
-        }
+        $this->client->createObjectDir($this->bucketName, $this->applyPathPrefix($dirname));
+
+        return true;
     }
 
     /**
@@ -509,239 +556,198 @@ class OssAdapter implements FilesystemAdapter
      *
      * @param string $path
      * @param string $visibility
-     * @throws \OSS\Http\RequestCore_Exception
+     *
+     * @return array|bool|false
      */
-    public function setVisibility(string $path, string $visibility): void
+    public function setVisibility($path, $visibility)
     {
-        $object = $this->prefixer->prefixPath($path);
-
-        $acl = Visibility::PUBLIC === $visibility ? OssClient::OSS_ACL_TYPE_PUBLIC_READ : OssClient::OSS_ACL_TYPE_PRIVATE;
+        $object = $this->applyPathPrefix($path);
+        $acl = AdapterInterface::VISIBILITY_PUBLIC === $visibility ? OssClient::OSS_ACL_TYPE_PUBLIC_READ : OssClient::OSS_ACL_TYPE_PRIVATE;
 
         try {
             $this->client->putObjectAcl($this->bucketName, $object, $acl);
         } catch (OssException $exception) {
-            throw UnableToSetVisibility::atLocation($path, $exception->getMessage());
-        }
-    }
-
-    /**
-     * @throws \OSS\Http\RequestCore_Exception
-     */
-    public function visibility(string $path): FileAttributes
-    {
-        try {
-            $acl = $this->client->getObjectAcl($this->bucketName, $this->prefixer->prefixPath($path), []);
-        } catch (OssException $exception) {
-            throw UnableToRetrieveMetadata::visibility($path, $exception->getMessage());
+            return false;
         }
 
-        return new FileAttributes($path, null, OssClient::OSS_ACL_TYPE_PRIVATE === $acl ? Visibility::PRIVATE : Visibility::PUBLIC);
+        return compact('visibility');
     }
 
     /**
      * Check whether a file exists.
      *
      * @param string $path
-     * @return bool
-     * @throws \OSS\Core\OssException
-     * @throws \OSS\Http\RequestCore_Exception
+     *
+     * @return array|bool|null
      */
-    public function fileExists(string $path): bool
+    public function has($path)
     {
-        $path = $this->prefixer->prefixPath($path);
+        $path = $this->applyPathPrefix($path);
 
         return $this->client->doesObjectExist($this->bucketName, $path);
     }
 
     /**
-     * @throws \OSS\Core\OssException
-     * @throws \OSS\Http\RequestCore_Exception
-     */
-    public function directoryExists(string $path): bool
-    {
-        return $this->client->doesObjectExist($this->bucketName, $this->prefixer->prefixDirectoryPath($path));
-    }
-
-    /**
      * Get resource url.
+     *
+     * @param string $path
+     *
+     * @return string
      */
-    public function getUrl(string $path): string
+    public function getUrl(string $path)
     {
-        $path = $this->prefixer->prefixPath($path);
+        $path = $this->applyPathPrefix($path);
 
         if (!is_null($this->cdnUrl)) {
-            return rtrim($this->cdnUrl, '/') . '/' . ltrim($path, '/');
+            return rtrim($this->cdnUrl, '/').'/'.ltrim($path, '/');
         }
 
-        return $this->normalizeHost() . ltrim($path, '/');
+        return $this->normalizeHost().ltrim($path, '/');
     }
 
     /**
      * read a file.
+     *
+     * @param string $path
+     *
+     * @return array|bool|false
      */
-    public function read(string $path): string
+    public function read($path)
     {
-        $path = $this->prefixer->prefixPath($path);
-
         try {
-            return $this->client->getObject($this->bucketName, $path);
-        } catch (\Exception $exception) {
-            throw UnableToReadFile::fromLocation($path, $exception->getMessage());
+            $contents = $this->getObject($path);
+        } catch (OssException $exception) {
+            return false;
         }
+
+        return compact('contents', 'path');
     }
 
     /**
      * read a file stream.
      *
-     * @return bool|resource
-     * @throws \OSS\Http\RequestCore_Exception
+     * @param string $path
+     *
+     * @return array|bool|false
      */
-    public function readStream(string $path)
+    public function readStream($path)
     {
-        $stream = fopen('php://temp', 'w+b');
-
         try {
-            fwrite($stream, $this->client->getObject($this->bucketName, $path, [OssClient::OSS_FILE_DOWNLOAD => $stream]));
+            $stream = fopen('php://temp', 'w+b');
+            fwrite($stream, $this->getObject($path));
+            rewind($stream);
         } catch (OssException $exception) {
-            fclose($stream);
-            throw UnableToReadFile::fromLocation($path, $exception->getMessage());
+            return false;
         }
-        rewind($stream);
 
-        return $stream;
+        return compact('stream', 'path');
     }
 
     /**
-     * @throws \Exception
+     * Lists all files in the directory.
+     *
+     * @param string $directory
+     * @param bool   $recursive
+     *
+     * @return array
+     *
+     * @throws OssException
      */
-    public function listContents(string $path, bool $deep): iterable
+    public function listContents($directory = '', $recursive = false)
     {
-        $directory = $this->prefixer->prefixDirectoryPath($path);
-        $nextMarker = '';
-        while (true) {
-            $options = [
-                OssClient::OSS_PREFIX => $directory,
-                OssClient::OSS_MARKER => $nextMarker,
-            ];
+        $list = [];
+        $directory = '/' == substr($directory, -1) ? $directory : $directory.'/';
+        $result = $this->listDirObjects($directory, $recursive);
 
-            try {
-                $listObjectInfo = $this->client->listObjects($this->bucketName, $options);
-                $nextMarker = $listObjectInfo->getNextMarker();
-            } catch (OssException $exception) {
-                throw new \Exception($exception->getErrorMessage(), 0, $exception);
-            }
-
-            $prefixList = $listObjectInfo->getPrefixList();
-            foreach ($prefixList as $prefixInfo) {
-                $subPath = $this->prefixer->stripDirectoryPrefix($prefixInfo->getPrefix());
-                if ($subPath == $path) {
+        if (!empty($result['objects'])) {
+            foreach ($result['objects'] as $files) {
+                if (!$fileInfo = $this->normalizeFileInfo($files)) {
                     continue;
                 }
-                yield new DirectoryAttributes($subPath);
-                if ($deep) {
-                    $contents = $this->listContents($subPath, true);
-                    foreach ($contents as $content) {
-                        yield $content;
-                    }
-                }
-            }
-
-            $listObject = $listObjectInfo->getObjectList();
-            if (!empty($listObject)) {
-                foreach ($listObject as $objectInfo) {
-                    $objectPath = $this->prefixer->stripPrefix($objectInfo->getKey());
-                    $objectLastModified = strtotime($objectInfo->getLastModified());
-                    if ('/' == substr($objectPath, -1, 1)) {
-                        continue;
-                    }
-                    yield new FileAttributes($objectPath, $objectInfo->getSize(), null, $objectLastModified);
-                }
-            }
-
-            if ('true' !== $listObjectInfo->getIsTruncated()) {
-                break;
+                $list[] = $fileInfo;
             }
         }
+
+        // prefix
+        if (!empty($result['prefix'])) {
+            foreach ($result['prefix'] as $dir) {
+                $list[] = [
+                    'type' => 'dir',
+                    'path' => $dir,
+                ];
+            }
+        }
+
+        return $list;
     }
 
     /**
-     * @throws \OSS\Http\RequestCore_Exception
+     * get meta data.
+     *
+     * @param string $path
+     *
+     * @return array|bool|false
      */
-    public function getMetadata($path): FileAttributes
+    public function getMetadata($path)
     {
+        $path = $this->applyPathPrefix($path);
+
         try {
-            $result = $this->client->getObjectMeta($this->bucketName, $this->prefixer->prefixPath($path));
+            $metadata = $this->client->getObjectMeta($this->bucketName, $path);
         } catch (OssException $exception) {
-            throw UnableToRetrieveMetadata::create($path, 'metadata', $exception->getErrorCode(), $exception);
+            return false;
         }
 
-        $size = (int)($result['content-length'] ?? 0);
-        $timestamp = isset($result['last-modified']) ? strtotime($result['last-modified']) : 0;
-        $mimetype = $result['content-type'] ?? '';
-
-        return new FileAttributes($path, $size, null, $timestamp, $mimetype);
+        return $metadata;
     }
 
     /**
      * get the size of file.
      *
      * @param string $path
-     * @return \League\Flysystem\FileAttributes
-     * @throws \OSS\Http\RequestCore_Exception
+     *
+     * @return array|false
      */
-    public function fileSize(string $path): FileAttributes
+    public function getSize($path)
     {
-        $meta = $this->getMetadata($path);
-        if (null === $meta->fileSize()) {
-            throw UnableToRetrieveMetadata::fileSize($path);
-        }
-
-        return $meta;
+        return $this->normalizeFileInfo(['Key' => $path]);
     }
 
     /**
      * get mime type.
      *
      * @param string $path
-     * @return \League\Flysystem\FileAttributes
-     * @throws \OSS\Http\RequestCore_Exception
+     *
+     * @return array|false
      */
-    public function mimeType(string $path): FileAttributes
+    public function getMimetype($path)
     {
-        $meta = $this->getMetadata($path);
-        if (null === $meta->mimeType()) {
-            throw UnableToRetrieveMetadata::mimeType($path);
-        }
-
-        return $meta;
+        return $this->normalizeFileInfo(['Key' => $path]);
     }
 
     /**
      * get timestamp.
      *
      * @param string $path
-     * @return \League\Flysystem\FileAttributes
-     * @throws \OSS\Http\RequestCore_Exception
+     *
+     * @return array
      */
-    public function lastModified(string $path): FileAttributes
+    public function getTimestamp($path)
     {
-        $meta = $this->getMetadata($path);
-        if (null === $meta->lastModified()) {
-            throw UnableToRetrieveMetadata::lastModified($path);
-        }
-
-        return $meta;
+        return $this->normalizeFileInfo(['Key' => $path]);
     }
 
     /**
      * normalize Host.
+     *
+     * @return string
      */
     protected function normalizeHost(): string
     {
         if ($this->isCName) {
             $domain = $this->endpoint;
         } else {
-            $domain = $this->bucketName . '.' . $this->endpoint;
+            $domain = $this->bucketName.'.'.$this->endpoint;
         }
 
         if ($this->useSSL) {
@@ -750,13 +756,11 @@ class OssAdapter implements FilesystemAdapter
             $scheme = 'http';
         }
 
-        return rtrim($scheme . '://' . $domain, '/') . '/';
+        return rtrim($scheme.'://'.$domain, '/').'/';
     }
 
     /**
      * Check the endpoint to see if SSL can be used.
-     *
-     * @return $this
      */
     protected function checkEndpoint(): OssAdapter
     {
@@ -769,5 +773,121 @@ class OssAdapter implements FilesystemAdapter
         }
 
         return $this;
+    }
+
+    /**
+     * Read an object from the OssClient.
+     *
+     * @param string $path
+     *
+     * @return string
+     * @throws \OSS\Core\OssException
+     * @throws \OSS\Http\RequestCore_Exception
+     */
+    protected function getObject(string $path)
+    {
+        $path = $this->applyPathPrefix($path);
+
+        return $this->client->getObject($this->bucketName, $path);
+    }
+
+    /**
+     * File list core method.
+     *
+     * @param string $dirname
+     * @param bool   $recursive
+     *
+     * @return array
+     *
+     * @throws OssException
+     */
+    public function listDirObjects($dirname = '', $recursive = false)
+    {
+        $delimiter = '/';
+        $nextMarker = '';
+        $maxkeys = 1000;
+
+        $result = [];
+
+        while (true) {
+            $options = [
+                'delimiter' => $delimiter,
+                'prefix' => $dirname,
+                'max-keys' => $maxkeys,
+                'marker' => $nextMarker,
+            ];
+
+            try {
+                $listObjectInfo = $this->client->listObjects($this->bucketName, $options);
+            } catch (OssException $exception) {
+                throw $exception;
+            }
+
+            $nextMarker = $listObjectInfo->getNextMarker();
+            $objectList = $listObjectInfo->getObjectList();
+            $prefixList = $listObjectInfo->getPrefixList();
+
+            if (!empty($objectList)) {
+                foreach ($objectList as $objectInfo) {
+                    $object['Prefix'] = $dirname;
+                    $object['Key'] = $objectInfo->getKey();
+                    $object['LastModified'] = $objectInfo->getLastModified();
+                    $object['eTag'] = $objectInfo->getETag();
+                    $object['Type'] = $objectInfo->getType();
+                    $object['Size'] = $objectInfo->getSize();
+                    $object['StorageClass'] = $objectInfo->getStorageClass();
+                    $result['objects'][] = $object;
+                }
+            } else {
+                $result['objects'] = [];
+            }
+
+            if (!empty($prefixList)) {
+                foreach ($prefixList as $prefixInfo) {
+                    $result['prefix'][] = $prefixInfo->getPrefix();
+                }
+            } else {
+                $result['prefix'] = [];
+            }
+
+            // Recursive directory
+            if ($recursive) {
+                foreach ($result['prefix'] as $prefix) {
+                    $next = $this->listDirObjects($prefix, $recursive);
+                    $result['objects'] = array_merge($result['objects'], $next['objects']);
+                }
+            }
+
+            if ('' === $nextMarker) {
+                break;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * normalize file info.
+     *
+     * @param array $stats
+     * @return array
+     */
+    protected function normalizeFileInfo(array $stats): array
+    {
+        $filePath = ltrim($stats['Key'], '/');
+
+        $meta = $this->getMetadata($filePath) ?? [];
+
+        if (empty($meta)) {
+            return [];
+        }
+
+        return [
+            'type' => 'file',
+            'mimetype' => $meta['content-type'],
+            'path' => $filePath,
+            'timestamp' => $meta['info']['filetime'],
+            'size' => $meta['content-length'],
+        ];
     }
 }
