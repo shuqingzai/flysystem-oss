@@ -18,7 +18,7 @@
         "ext-openssl": "*",
         "ext-curl": "*",
         "ext-json": "*",
-        "php": "^7.4",
+        "php": "^8.0",
         "league/flysystem": "^2.5",
         "aliyuncs/oss-sdk-php": "^2.4"
     },
