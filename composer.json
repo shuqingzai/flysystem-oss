@@ -18,8 +18,8 @@
         "ext-openssl": "*",
         "ext-curl": "*",
         "ext-json": "*",
-        "php": ">=7.2",
-        "league/flysystem": "^2.0",
+        "php": "^7.4",
+        "league/flysystem": "^2.5",
         "aliyuncs/oss-sdk-php": "^2.4"
     },
     "autoload": {
@@ -27,9 +27,14 @@
             "Iidestiny\\Flysystem\\Oss\\": "src"
         }
     },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
+    },
     "require-dev": {
-        "mockery/mockery": "^1.2",
-        "phpunit/phpunit": "^6.5",
-        "symfony/var-dumper": "^3.4"
+        "mockery/mockery": "^1.5",
+        "phpunit/phpunit": "^9.5",
+        "symfony/var-dumper": "^5.4"
     }
 }
